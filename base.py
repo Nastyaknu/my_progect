@@ -21,15 +21,35 @@ def create_table():
     FOREIGN KEY (category_id) REFERENCES categories(id)
         )
     """)
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS users(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT not null,
+    password TEXT uniqe not null)    
+    """)
     conn.commit()
     conn.close()
-def get_products(search_query=""):
+def get_products(search_query="", category_id=None):
     with sqlite3.connect("catalog.db") as conn:
         cursor = conn.cursor()
+        sql="SELECT name, description, features, price, image FROM products"
+        conditions=[]
+        parameters=[]
         if search_query:
-            cursor.execute("SELECT name, description, features, price, image FROM products WHERE name LIKE ?", (f"%{search_query}%",))
-        else:
-            cursor.execute("SELECT name, description, features, price, image FROM products")
+           conditions.append("name LIKE ?")
+           parameters.append(f"{search_query}%")
+        if category_id:
+            conditions.append("category_id= ?")
+            parameters.append(category_id)
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
+        cursor.execute(sql, parameters)
+        return cursor.fetchall()
+def get_categories():
+    with sqlite3.connect("catalog.db") as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id,name FROM categories")
         return cursor.fetchall()
 
 def add_data_to_table():
@@ -71,5 +91,6 @@ def add_data_to_table():
 
     conn.commit()
     conn.close()
+
 
 
