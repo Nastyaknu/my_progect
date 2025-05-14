@@ -33,7 +33,7 @@ def create_table():
 def get_products(search_query="", category_id=None):
     with sqlite3.connect("catalog.db") as conn:
         cursor = conn.cursor()
-        sql="SELECT name, description, features, price, image FROM products"
+        sql="SELECT id, name, description, features, price, image FROM products"
         conditions=[]
         parameters=[]
         if search_query:
