@@ -66,6 +66,69 @@ def application(environ, start_response):
         else:
             start_response('404 Not Found', [('Content-Type', 'text/plain')])
             return ['File not found'.encode('utf-8')]
+    if path=='/sign_in':
+        start_response('200 OK', [('Content-type', 'text/html; charset=utf-8')])
+        return ["""
+            <!DOCTYPE html>
+            <html lang="uk">
+            <head><meta charset="UTF-8"><title>Авторизація</title></head>
+            <body>
+                <h1>Авторизація</h1>
+                <form method="get" action="/login">
+                    <input type="submit" value="Увійти">
+                </form>
+                <form method="get" action="/register">
+                    <input type="submit" value="Зареєструватися">
+                </form>
+                <a href="/">← Назад до магазину</a>
+            </body>
+            </html>
+            """.encode('utf-8')]
+    if path=='/login' and environ["REQUEST_METHOD"] == "GET":
+        start_response('200 OK', [('Content-type', 'text/html; charset=utf-8')])
+        return ["""
+                <!DOCTYPE html>
+                <html lang="uk">
+                <head><meta charset="UTF-8"><title>Вхід</title></head>
+                <body>
+                    <h1>Увійти</h1>
+                    <form method="post" action="/login">
+                        <label>Ім'я користувача: <input type="text" name="username"></label><br><br>
+                        <label>Пароль: <input type="password" name="password"></label><br><br>
+                        <input type="submit" value="Увійти">
+                    </form>
+                    <a href="/">← Назад</a>
+                </body>
+                </html>
+                """.encode('utf-8')]
+    if path=='/login' and environ["REQUEST_METHOD"] == "POST":
+        try:
+            size=int(environ.get('CONTENT_LENGTH', 0))
+        except ValueError:
+            size = 0
+        data=environ['wsgi.input'].read(size).decode('utf-8')
+        params=urllib.parse.parse_qs(data)
+        username=params.get('username', [''])[0]
+        password=params.get('password', [''])[0]
+        with sqlite3.connect("catalog.db") as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM users WHERE username = ? and password=?", (username,password))
+            row=cursor.fetchone()
+        if row:
+            start_response('200 OK', [('Content-Type', 'text/html; charset=utf-8')])
+            return [f"""
+                        <html><body>
+                        <h2>Вітаємо, {username}!</h2>
+                        <p>Ви успішно увійшли.</p>
+                        <a href="/">Повернутися до магазину</a>
+                        </body></html>
+                        """.encode('utf-8')]
+
+        else:
+            start_response('200 OK', [('Content-Type', 'text/html; charset=utf-8')])
+            return [f"<html><body><h2>Не вірне ім'я користувача або пароль!</h2><a href='/login'>Спробувати знову</a></body></html>".encode(
+                    'utf-8')]
+
 
     if path == '/register':
         return handle_register(environ, start_response)
@@ -103,25 +166,57 @@ def application(environ, start_response):
 
         start_response('404 Not Found', [('Content-Type', 'text/plain; charset=utf-8')])
         return ["Товар не знайдено".encode('utf-8')]
+
+    if path == '/add-to-cart' and environ['REQUEST_METHOD'] == 'POST':
+        size = int(environ.get('CONTENT_LENGTH', 0))
+        post_data = environ['wsgi.input'].read(size)
+        params = parse_qs(post_data.decode())
+        product_id = params.get('product_id', [''])[0]
+
+        cart = cookies.get('cart', '')
+        cart_items = cart.split(',') if cart else []
+        if product_id and product_id.isdigit():
+            cart_items.append(product_id)
+
+        new_cookie = SimpleCookie()
+        new_cookie['cart'] = ','.join(cart_items)
+        new_cookie['cart']['path'] = '/'
+
+        start_response('303 See Other', [
+            ('Location', '/cart'),
+            ('Set-Cookie', new_cookie.output(header='', sep=''))
+        ])
+        return [''.encode('utf-8')]
+
+
+
+
     if path == '/cart':
         cart_ids=cookies.get('cart','').split(',' )if cookies.get('cart') else[]
-        cart_ids=[int(cid)for cid in cart_ids if cid.isdigit()]
+        cart_ids=[cid for cid in cart_ids if cid.isdigit()]
+        remove_id = parse_qs(environ.get("QUERY_STRING", "")).get("remove", [""])[0]
+        if remove_id in cart_ids:
+            cart_ids.remove(remove_id)
+        new_cart_cookie=",".join(cart_ids)
         with sqlite3.connect("catalog.db") as conn:
             cursor = conn.cursor()
             if cart_ids:
                 plase_holders=','.join(['?']*len(cart_ids))
-                cursor.execute(f"select name, price from products where id in ({plase_holders})", cart_ids)
+                cursor.execute(f"select id, name, price from products where id in ({plase_holders})", cart_ids)
                 items = cursor.fetchall()
             else:
                 items = []
             html = """<h1>Ваш кошик</h1><ul> """
             total=0
-            for name, price in items:
-                html += f"<li>{name}: {price}грн</li>"
-                total += price
+            for pid, name, price in items:
+                html += f"<li>{name}: {price}грн"
+                total += float(str(price).replace('\u202f', '').replace(' ', ''))
+                html += f"<a href='/cart?remove={pid}'>Видалити</a></li>"
             html += f"</ul><p><strong>Загальна сума:</strong> {total} грн</p>"
             html += '<p><a href="/">⬅️ Назад до каталогу</a></p>'
-            start_response("200 OK", [("Content-Type", "text/html; charset=utf-8")])
+            header=[("Content-Type", "text/html; charset=utf-8")]
+            header.append(('set-cookie', f'cart={new_cart_cookie};Path=/'))
+            start_response("200 OK", header)
             return [html.encode("utf-8")]
 
 
@@ -177,11 +272,8 @@ def application(environ, start_response):
                 {category_options}
             </select>
             <input type="submit" value="Знайти">
-            <button onclick="window.location.href='/register'" type="button">Реєстрація</button>
-            <form method="post" action="/cart">
-                    <input type="hidden" name="product_id" value="{product_id}">
-                    <input type="submit" value="Показати кошик">
-                </form>
+            <button onclick="window.location.href='/sign_in'" type="button">Акаунт</button>
+            <button onclick="window.location.href='/cart'" type="button">Кошик</button>
         </form>
     """
 
