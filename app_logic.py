@@ -156,7 +156,9 @@ def application(environ, start_response):
 
                 <form method="post" action="/add-to-cart">
                     <input type="hidden" name="product_id" value="{product_id}">
+                    <input type ="number" name="quantity" value="1" min="1">
                     <input type="submit" value="Додати в кошик">
+                    
                 </form>
 
                 <p><a href="/">На головну</a></p>
@@ -172,14 +174,25 @@ def application(environ, start_response):
         post_data = environ['wsgi.input'].read(size)
         params = parse_qs(post_data.decode())
         product_id = params.get('product_id', [''])[0]
-
+        quantity = params.get('quantity', ['1'])[0]
         cart = cookies.get('cart', '')
-        cart_items = cart.split(',') if cart else []
-        if product_id and product_id.isdigit():
-            cart_items.append(product_id)
+        cart_items = []#cart.split(',') if cart else []
+        if cart:
+            for item in cart.split(','):
+                if ":" in item:
+                    pid,qty = item.split(':')
+                    cart_items.append((pid,int(qty)))
+        found=False
+        for idx,(pid,qty) in enumerate(cart_items):
+            if pid==product_id:
+                cart_items[idx] = (pid,qty+ int(quantity))
+                found=True
+                break
+        if not found:
+            cart_items.append((product_id,int(quantity)))
 
         new_cookie = SimpleCookie()
-        new_cookie['cart'] = ','.join(cart_items)
+        new_cookie['cart'] = ','.join([f"{pid}:{qty}" for pid, qty in cart_items])
         new_cookie['cart']['path'] = '/'
 
         start_response('303 See Other', [
@@ -188,37 +201,47 @@ def application(environ, start_response):
         ])
         return [''.encode('utf-8')]
 
-
-
-
     if path == '/cart':
-        cart_ids=cookies.get('cart','').split(',' )if cookies.get('cart') else[]
-        cart_ids=[cid for cid in cart_ids if cid.isdigit()]
+        raw_cart = cookies.get('cart', '')
+        cart_items = []
+        for item in raw_cart.split(','):
+            if ':' in item:
+                pid, qty = item.split(':')
+                if pid.isdigit() and qty.isdigit():
+                    cart_items.append((pid, int(qty)))
+
         remove_id = parse_qs(environ.get("QUERY_STRING", "")).get("remove", [""])[0]
-        if remove_id in cart_ids:
-            cart_ids.remove(remove_id)
-        new_cart_cookie=",".join(cart_ids)
+        if remove_id:
+            cart_items = [(pid, qty) for pid, qty in cart_items if pid != remove_id]
+
+        new_cart_cookie = ','.join([f"{pid}:{qty}" for pid, qty in cart_items])
+
         with sqlite3.connect("catalog.db") as conn:
             cursor = conn.cursor()
-            if cart_ids:
-                plase_holders=','.join(['?']*len(cart_ids))
-                cursor.execute(f"select id, name, price from products where id in ({plase_holders})", cart_ids)
-                items = cursor.fetchall()
+            if cart_items:
+                placeholders = ','.join(['?'] * len(cart_items))
+                cursor.execute(f"SELECT id, name, price FROM products WHERE id IN ({placeholders})",
+                               [pid for pid, _ in cart_items])
+                rows = cursor.fetchall()
+                id_to_product = {str(row[0]): row for row in rows}
             else:
-                items = []
-            html = """<h1>Ваш кошик</h1><ul> """
-            total=0
-            for pid, name, price in items:
-                html += f"<li>{name}: {price}грн"
-                total += float(str(price).replace('\u202f', '').replace(' ', ''))
-                html += f"<a href='/cart?remove={pid}'>Видалити</a></li>"
-            html += f"</ul><p><strong>Загальна сума:</strong> {total} грн</p>"
-            html += '<p><a href="/">⬅️ Назад до каталогу</a></p>'
-            header=[("Content-Type", "text/html; charset=utf-8")]
-            header.append(('set-cookie', f'cart={new_cart_cookie};Path=/'))
-            start_response("200 OK", header)
-            return [html.encode("utf-8")]
+                id_to_product = {}
 
+        html = """<h1>Ваш кошик</h1><ul>"""
+        total = 0
+        for pid, qty in cart_items:
+            if pid in id_to_product:
+                _, name, price = id_to_product[pid]
+                sum_price = float(price) * qty
+                total += sum_price
+                html += f"<li>{name} × {qty} = {sum_price} грн <a href='/cart?remove={pid}'>Видалити</a></li>"
+
+        html += f"</ul><p><strong>Загальна сума:</strong> {total} грн</p>"
+        html += '<p><a href="/">⬅️ Назад до каталогу</a></p>'
+        headers = [("Content-Type", "text/html; charset=utf-8")]
+        headers.append(('Set-Cookie', f'cart={new_cart_cookie};Path=/'))
+        start_response("200 OK", headers)
+        return [html.encode("utf-8")]
 
     # Головна сторінка
     query_string = environ.get('QUERY_STRING', '')
