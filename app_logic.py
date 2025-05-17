@@ -49,11 +49,14 @@ def handle_register(environ, start_response):
             <input type="submit" value="Зареєструватися">
         </form>
     """.encode('utf-8')]
+
+
 def parse_cookies(environ):
     cookie = SimpleCookie()
     if 'HTTP_COOKIE' in environ:
         cookie.load(environ['HTTP_COOKIE'])
     return {key: morsel.value for key, morsel in cookie.items()}
+
 
 def application(environ, start_response):
     path = environ.get('PATH_INFO', '')
@@ -66,7 +69,7 @@ def application(environ, start_response):
         else:
             start_response('404 Not Found', [('Content-Type', 'text/plain')])
             return ['File not found'.encode('utf-8')]
-    if path=='/sign_in':
+    if path == '/sign_in':
         start_response('200 OK', [('Content-type', 'text/html; charset=utf-8')])
         return ["""
             <!DOCTYPE html>
@@ -84,7 +87,7 @@ def application(environ, start_response):
             </body>
             </html>
             """.encode('utf-8')]
-    if path=='/login' and environ["REQUEST_METHOD"] == "GET":
+    if path == '/login' and environ["REQUEST_METHOD"] == "GET":
         start_response('200 OK', [('Content-type', 'text/html; charset=utf-8')])
         return ["""
                 <!DOCTYPE html>
@@ -101,19 +104,19 @@ def application(environ, start_response):
                 </body>
                 </html>
                 """.encode('utf-8')]
-    if path=='/login' and environ["REQUEST_METHOD"] == "POST":
+    if path == '/login' and environ["REQUEST_METHOD"] == "POST":
         try:
-            size=int(environ.get('CONTENT_LENGTH', 0))
+            size = int(environ.get('CONTENT_LENGTH', 0))
         except ValueError:
             size = 0
-        data=environ['wsgi.input'].read(size).decode('utf-8')
-        params=urllib.parse.parse_qs(data)
-        username=params.get('username', [''])[0]
-        password=params.get('password', [''])[0]
+        data = environ['wsgi.input'].read(size).decode('utf-8')
+        params = urllib.parse.parse_qs(data)
+        username = params.get('username', [''])[0]
+        password = params.get('password', [''])[0]
         with sqlite3.connect("catalog.db") as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT id FROM users WHERE username = ? and password=?", (username,password))
-            row=cursor.fetchone()
+            cursor.execute("SELECT id FROM users WHERE username = ? and password=?", (username, password))
+            row = cursor.fetchone()
         if row:
             start_response('200 OK', [('Content-Type', 'text/html; charset=utf-8')])
             return [f"""
@@ -126,9 +129,9 @@ def application(environ, start_response):
 
         else:
             start_response('200 OK', [('Content-Type', 'text/html; charset=utf-8')])
-            return [f"<html><body><h2>Не вірне ім'я користувача або пароль!</h2><a href='/login'>Спробувати знову</a></body></html>".encode(
+            return [
+                f"<html><body><h2>Не вірне ім'я користувача або пароль!</h2><a href='/login'>Спробувати знову</a></body></html>".encode(
                     'utf-8')]
-
 
     if path == '/register':
         return handle_register(environ, start_response)
@@ -141,7 +144,8 @@ def application(environ, start_response):
         if product_id:
             with sqlite3.connect("catalog.db") as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT name, description, features, price, image FROM products WHERE id = ?", (product_id,))
+                cursor.execute("SELECT name, description, features, price, image FROM products WHERE id = ?",
+                               (product_id,))
                 row = cursor.fetchone()
 
             if row:
@@ -158,7 +162,7 @@ def application(environ, start_response):
                     <input type="hidden" name="product_id" value="{product_id}">
                     <input type ="number" name="quantity" value="1" min="1">
                     <input type="submit" value="Додати в кошик">
-                    
+
                 </form>
 
                 <p><a href="/">На головну</a></p>
@@ -176,20 +180,20 @@ def application(environ, start_response):
         product_id = params.get('product_id', [''])[0]
         quantity = params.get('quantity', ['1'])[0]
         cart = cookies.get('cart', '')
-        cart_items = []#cart.split(',') if cart else []
+        cart_items = []  # cart.split(',') if cart else []
         if cart:
             for item in cart.split(','):
                 if ":" in item:
-                    pid,qty = item.split(':')
-                    cart_items.append((pid,int(qty)))
-        found=False
-        for idx,(pid,qty) in enumerate(cart_items):
-            if pid==product_id:
-                cart_items[idx] = (pid,qty+ int(quantity))
-                found=True
+                    pid, qty = item.split(':')
+                    cart_items.append((pid, int(qty)))
+        found = False
+        for idx, (pid, qty) in enumerate(cart_items):
+            if pid == product_id:
+                cart_items[idx] = (pid, qty + int(quantity))
+                found = True
                 break
         if not found:
-            cart_items.append((product_id,int(quantity)))
+            cart_items.append((product_id, int(quantity)))
 
         new_cookie = SimpleCookie()
         new_cookie['cart'] = ','.join([f"{pid}:{qty}" for pid, qty in cart_items])
